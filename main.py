@@ -39,7 +39,32 @@ cursor = connection.cursor()
 cursor.execute("SELECT chromosome_number FROM genome")
 tables = cursor.fetchall()
 
-def checks(bacterial, potential_genes, bases):
+# Checks
+
+def get_genes(bases):
+    stops = {"TAA", "TAG", "TGA"}  # Which codons correspond to stop codons
+
+    potential_genes = []
+
+    # Seperates into three reading frames
+    for frame in range(3):
+        # Loops through each position in each reading frame
+        for pos in range(frame, length - 2, 3):
+            codon = ''.join(bases[pos:pos + 3])
+
+            # Checks for start codon
+            if codon == "ATG":
+                # Looks for stop codon
+                for stop in range(pos + 3, length - 2, 3):
+                    stop_codon = ''.join(bases[stop:stop + 3])
+
+                    if stop_codon in stops:
+                        potential_genes.append((pos, stop + 3))
+                        break
+
+    return potential_genes
+
+def remove_nested(potential_genes):
     # Reverses gene list
     potential_genes.sort(key=lambda x: x[1] - x[0], reverse=True)
 
@@ -47,7 +72,7 @@ def checks(bacterial, potential_genes, bases):
 
     # Looks through all the start and stops
     for start, stop in potential_genes:
-        contained = False # Marks it as not contained by default
+        contained = False  # Marks it as not contained by default
         for fstart, fstop in filtered:
 
             # Flags it if it is nested inside another gene
@@ -61,10 +86,13 @@ def checks(bacterial, potential_genes, bases):
 
     potential_genes = filtered
 
-    # Confidence ranking to give each gene a score
-    confidence = [0 for i in range(len(potential_genes))]
+    # Puts list back to normal
+    potential_genes.sort(key=lambda x: x[1] - x[0], reverse=True)
 
-    # Check for shine-dalgarno sequence
+    return potential_genes
+
+def shine_dalgarno(potential_genes, bases, confidence_factor):
+    confidence = [0 for i in range(len(potential_genes))]
 
     # Partials
     partials = {"GAGG", "GGAGGT", "AGGA", "GGAG", "GAGGT", "TAAGG"}
@@ -74,9 +102,14 @@ def checks(bacterial, potential_genes, bases):
             upstream = ''.join(bases[max(0, start - 10):start])
 
             if "AGGAGG" in upstream:
-                confidence[i] += .3
-            elif True in [partial in upstream for partial in partials]:
-                confidence[i] += .3
+                confidence[i] += confidence_factor
+            elif True in [partial in upstream for partial in partials]: # Checks for partials
+                confidence[i] += confidence_factor
+
+    return confidence
+
+def gc_comparison(potential_genes, bases, confidence_factor, gc_goal):
+    confidence = [0 for i in range(len(potential_genes))]
 
     # Checks for gc content
     for i, (start, stop) in enumerate(potential_genes):
@@ -84,10 +117,13 @@ def checks(bacterial, potential_genes, bases):
         gc = (seq.count("G") + seq.count("C")) / len(seq)
 
         # Genes generally have more GC contents
-        if .35 < gc < .45:
-            confidence[i] += .3
+        if (gc_goal - .1) < gc < (gc_goal + .1):
+            confidence[i] += confidence_factor
 
-    # Codon usage bias checks
+    return confidence
+
+def codon_bias_check(potential_genes, bases, confidence_factor_positive, confidence_factor_negative):
+    confidence = [0 for i in range(len(potential_genes))]
 
     # Gets total codon usage in organism
     codon_freq = {}
@@ -117,122 +153,122 @@ def checks(bacterial, potential_genes, bases):
         if codon_count > 0:
             confidence[i] += score / codon_count
 
-    filtered = []
-    filtered_confidence = []
+    return confidence
 
-    # Filters out anything with too low of a score
-    for i, val in enumerate(confidence):
-        if val < .1:
-            pass
+# Graphing
+
+def graph_line(length, genome, chromosome):
+    plt.figure()
+    plt.hlines(y=0, xmin=0, xmax=length, color="black")
+    plt.xlim(0, length)
+
+    plt.yticks([])
+    plt.xlabel("Base Position")
+    plt.title(f"{genome} chromosome {chromosome}")
+
+    plt.scatter([0, 0, length], [-1, 1, 1], color="black", s=0)
+
+def graph_genes(lines, alphas, y_scale):
+    for i, (start, stop) in enumerate(lines):
+        plt.scatter(start, 0, c="red", s=0)
+        plt.scatter(stop, 0, c="blue", s=0)
+
+        # Labels genes
+        if start % 3 == 0:
+            plt.hlines(y=.1*y_scale, xmin=start, xmax=stop, color="red", alpha=min(alphas[i] * 5, 1))
+        elif start % 3 == 1:
+            plt.hlines(y=.2*y_scale, xmin=start, xmax=stop, color="blue", alpha=min(alphas[i] * 5, 1))
+        elif start % 3 == 2:
+            plt.hlines(y=.3*y_scale, xmin=start, xmax=stop, color="brown", alpha=min(alphas[i] * 5, 1))
+        # plt.annotate(text=str(i),
+        # xy=((start+stop)/2, 0),
+        # xytext=((start+stop)/2, (.1 if i % 2 == 1 else -.1)),
+        # ha="center")
+
+        print(f"{i} of {len(lines)} genes mapped." + (
+            "  Confidence = " + str(alphas[i]) if alphas[i] > 0 else ""))
+
+if __name__ == "__main__":
+    # Primary loop for accessing data
+    while True:
+        # Chromosome choice
+        access = input(f"Enter chromosome index to access(1 - {len(tables)}): ") if len(tables) > 1 else 1
+
+        # Checks for valid choice
+        passed = True
+        try:
+            access = int(access)
+        except ValueError:
+            passed = False
+
+        if (access > len(tables) or access < 1) and passed:
+            print("Invalid index.")
+
+        # Checks passed; gives info on chromosome
         else:
-            filtered.append(potential_genes[i])
-            filtered_confidence.append(confidence[i])
+            # Gets chromosome base sequence
+            chromosome = access
+            bases = cursor.execute("SELECT base_sequence FROM genome WHERE chromosome_number = ?", (chromosome,)).fetchall()[0][0]
+            length = len(bases)
 
-    potential_genes = filtered
-    confidence = filtered_confidence
+            print(f"chromosome: {access}")
+            print(f"bases: {length}")
 
-    return potential_genes, confidence
+            graph_line(length, genome, access)
 
-# Primary loop for accessing data
-while True:
-    # Chromosome choice
-    access = input(f"Enter chromosome index to access(1 - {len(tables)}): ") if len(tables) > 1 else 1
+            potential_genes = get_genes(bases)
 
-    # Checks for valid choice
-    passed = True
-    try:
-        access = int(access)
-    except:
-        passed = False
+            # Gene checks
+            confidence = [0 for i in range(len(potential_genes))]
 
-    if (access > len(tables) or access < 1) and passed:
-        print("Invalid index.")
+            potential_genes = remove_nested(potential_genes)
 
-    # Checks passed; gives info on chromosome
-    else:
-        # Gets chromosome base sequence
-        chromosome = access
-        bases = cursor.execute("SELECT base_sequence FROM genome WHERE chromosome_number = ?", (chromosome,)).fetchall()[0][0]
-        print(f"chromosome: {access}")
-        print(f"bases: {len(bases)}")
+            shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, 0.3) if bacterial else [0 for i in range(len(potential_genes))]
+            gc_confidence = gc_comparison(potential_genes, bases, .3, .48)
+            codon_bias_confidence = codon_bias_check(potential_genes, bases, .3, .1)
 
-        # Creates number line
-        length = len(bases)
+            confidence = [confidence[i] +(shine_dalgarno_confidence[i] + gc_confidence[i] + codon_bias_confidence[i]) for i in range(len(potential_genes))]
 
-        plt.figure()
-        plt.hlines(y=0, xmin=0, xmax=length, color="black")
-        plt.xlim(0, length)
+            # Removes any genes with too low a confidence
+            threshold = .3
 
-        plt.yticks([])
-        plt.xlabel("Base Position")
-        plt.title(f"{genome} chromosome {access}")
+            filtered_genes = []
+            filtered_confidence = []
 
-        plt.scatter([0, 0, len(bases)], [-1, 1, 1], color="black", s=0)
+            for i, val in enumerate(confidence):
+                if val < threshold:
+                    pass
+                else:
+                    filtered_genes.append(potential_genes[i])
+                    filtered_confidence.append(confidence[i])
 
-        # Searches for potential genes
-        stops = {"TAA", "TAG", "TGA"} # Which codons correspond to stop codons
+            potential_genes = filtered_genes
+            confidence = filtered_confidence
 
-        potential_genes = []
+            # Plots gene map
+            graph_genes(potential_genes, confidence, 1)
 
-        # Seperates into three reading frames
-        for frame in range(3):
-            # Loops through each position in each reading frame
-            for pos in range(frame, length - 2, 3):
-                codon = ''.join(bases[pos:pos+3])
+                # Loops through all codons to assign amino acids
+                # amino_acids = []
 
-                # Checks for start codon
-                if codon == "ATG":
-                    # Looks for stop codon
-                    for stop in range(pos+3, length-2, 3):
-                        stop_codon = ''.join(bases[stop:stop+3])
-
-                        if stop_codon in stops:
-                            potential_genes.append((pos, stop+3))
-                            break
-
-        potential_genes, confidence = checks(bacterial, potential_genes, bases)
-
-        # Plots gene map
-        i = 1
-        for i, (start, stop) in enumerate(potential_genes):
-            plt.scatter(start, 0, c="red", s=0)
-            plt.scatter(stop, 0, c="blue", s=0)
-
-            # Labels genes
-            if start % 3 == 0:
-                plt.hlines(y=-.1, xmin=start, xmax=stop, color="red", alpha=min(confidence[i] *5, 1))
-            elif start % 3 == 1:
-                plt.hlines(y=-.2, xmin=start, xmax=stop, color="blue", alpha=min(confidence[i] *5, 1))
-            elif start % 3 == 2:
-                plt.hlines(y=-.3, xmin=start, xmax=stop, color="brown", alpha=min(confidence[i] *5, 1))
-            #plt.annotate(text=str(i),
-                         #xy=((start+stop)/2, 0),
-                         #xytext=((start+stop)/2, (.1 if i % 2 == 1 else -.1)),
-                         #ha="center")
-
-            print(f"{i} of {len(potential_genes)} genes mapped." + ("  Confidence = " + str(confidence[i]) if confidence[i] > 0 else ""))
-
-            # Loops through all codons to assign amino acids
-            amino_acids = []
-
-            # for j in range(int(start/3), int(stop/3)):
-                # amino_acids.append(codon_table[codons[int(j)]])
+                # for j in range(int(start/3), int(stop/3)):
+                    # amino_acids.append(codon_table[codons[int(j)]])
 
 
-            # print(f"total bps in gene {i}: {len(amino_acids*3)}")
-            # print(f"amino acids in gene {i}: {amino_acids}\n")
+                # print(f"total bps in gene {i}: {len(amino_acids*3)}")
+                # print(f"amino acids in gene {i}: {amino_acids}\n")
 
-            # Updates current letter
-            i += 1
+                # Updates current letter
+                # i += 1
 
-        # Plots TATA boxes
-        #for i in range(len(bases)-3):
-        #    if bases[i:i+6] == "TATAAA":
-        #        plt.scatter(i, 0, color="green", s=10)
+            # Plots TATA boxes
+            #for i in range(len(bases)-3):
+            #    if bases[i:i+6] == "TATAAA":
+            #        plt.scatter(i, 0, color="green", s=10)
 
-        plt.show()
+            plt.show()
 
-        print(confidence)
+            print(confidence)
 
-        if input("Press ENTER to exit, or any key then enter to view other chromosome\n") == '':
-            break
+            if input("Press ENTER to exit, or any key then enter to view other chromosome\n") == '':
+                break
