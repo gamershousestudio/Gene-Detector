@@ -86,9 +86,6 @@ def remove_nested(potential_genes):
 
     potential_genes = filtered
 
-    # Puts list back to normal
-    potential_genes.sort(key=lambda x: x[1] - x[0], reverse=True)
-
     return potential_genes
 
 def shine_dalgarno(potential_genes, bases, confidence_factor):
@@ -155,6 +152,35 @@ def codon_bias_check(potential_genes, bases, confidence_factor_positive, confide
 
     return confidence
 
+def check_genes(potential_genes, bases, threshold):
+    confidence = [0 for i in range(len(potential_genes))]
+
+    potential_genes = remove_nested(potential_genes)
+
+    shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, 0.3) if bacterial else [0 for i in range(len(potential_genes))]
+    gc_confidence = gc_comparison(potential_genes, bases, .3, .48)
+    codon_bias_confidence = codon_bias_check(potential_genes, bases, .3, .1)
+
+    confidence = [confidence[i] + (shine_dalgarno_confidence[i] + gc_confidence[i] + codon_bias_confidence[i]) for i in range(len(potential_genes))]
+
+    # Removes any genes with too low a confidence
+    threshold = .3
+
+    filtered_genes = []
+    filtered_confidence = []
+
+    for i, val in enumerate(confidence):
+        if val < threshold:
+            pass
+        else:
+            filtered_genes.append(potential_genes[i])
+            filtered_confidence.append(confidence[i])
+
+    potential_genes = filtered_genes
+    confidence = filtered_confidence
+
+    return potential_genes, confidence
+
 # Graphing
 
 def graph_line(length, genome, chromosome):
@@ -217,36 +243,18 @@ if __name__ == "__main__":
             graph_line(length, genome, access)
 
             potential_genes = get_genes(bases)
+            reverse_potential_genes = get_genes(bases[::-1])
 
             # Gene checks
-            confidence = [0 for i in range(len(potential_genes))]
+            potential_genes, confidence = check_genes(potential_genes, bases, .3)
+            reverse_potential_genes, reverse_confidence = check_genes(reverse_potential_genes, bases[::-1], .3)
 
-            potential_genes = remove_nested(potential_genes)
-
-            shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, 0.3) if bacterial else [0 for i in range(len(potential_genes))]
-            gc_confidence = gc_comparison(potential_genes, bases, .3, .48)
-            codon_bias_confidence = codon_bias_check(potential_genes, bases, .3, .1)
-
-            confidence = [confidence[i] +(shine_dalgarno_confidence[i] + gc_confidence[i] + codon_bias_confidence[i]) for i in range(len(potential_genes))]
-
-            # Removes any genes with too low a confidence
-            threshold = .3
-
-            filtered_genes = []
-            filtered_confidence = []
-
-            for i, val in enumerate(confidence):
-                if val < threshold:
-                    pass
-                else:
-                    filtered_genes.append(potential_genes[i])
-                    filtered_confidence.append(confidence[i])
-
-            potential_genes = filtered_genes
-            confidence = filtered_confidence
+            # Makes reversed genes start/stop accurate
+            reverse_potential_genes = [(length - starts, length - stops) for starts, stops in reverse_potential_genes]
 
             # Plots gene map
             graph_genes(potential_genes, confidence, 1)
+            graph_genes(reverse_potential_genes, reverse_confidence, -1)
 
                 # Loops through all codons to assign amino acids
                 # amino_acids = []
