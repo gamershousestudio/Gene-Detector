@@ -68,7 +68,7 @@ def shine_dalgarno(potential_genes, bases, confidence_factor):
     # Partials
     partials = {"GAGG", "GGAGGT", "AGGA", "GGAG", "GAGGT", "TAAGG"}
     for i, (start, stop) in enumerate(potential_genes):
-        upstream = ''.join(bases[max(0, start - 10):start])
+        upstream = ''.join(bases[max(0, start - 20):start-5])
 
         if "AGGAGG" in upstream:
             confidence[i] += confidence_factor
@@ -174,13 +174,36 @@ def stop_distribution(potential_genes, bases, confidence_factor_negative):
 
     return confidence
 
-# TODO: ALTERNATIVE FRAME STOP DENSITY
+# TODO: ALTERNATIVE FRAME STOP DENSITY -- Complete --
+def alternate_stops(potential_genes, bases, confidence_factor_positive, confidence_factor_negative):
+    stops = {"TAA", "TAG", "TGA"}  # Which codons correspond to stop codons
 
-# TODO: CODING PERIODICITY (fourier signal)
+    confidence = [0 for i in range(len(potential_genes))]
 
-# TODO: CODON ADAPTATION INDEX
+    for i, (start, stop) in enumerate(potential_genes):
+        frame1 = 0
+        frame2 = 0
 
-# TODO: START CODON CONTEXT
+        for j in range(start, stop):
+            if bases[j:j+3] in stops:
+                if j % 3 == 1:
+                    frame1 += 1
+                elif j % 3 == 2:
+                    frame2 += 1
+
+        frame1 = frame1 / (stop - start)
+        frame2 = frame2 / (stop - start)
+
+        if frame1 > .2 or frame2 > .2:
+            confidence[i] += confidence_factor_positive * frame1 * frame2
+        else:
+            confidence[i] -= confidence_factor_negative
+
+    return confidence
+
+# TODO: CODING PERIODICITY (fourier signal) -- Wait --
+
+# TODO: CODON ADAPTATION INDEX -- Wait --
 
 # TODO: AMINO ACID ENTROPY CHECK
 
@@ -191,11 +214,12 @@ def check_genes(potential_genes, bases, threshold):
     gc_confidence = gc_comparison(potential_genes, bases, .3, .1, .48)
     codon_bias_confidence = codon_bias_check(potential_genes, bases, 3, .3)
     stop_distribution_confidence = stop_distribution(potential_genes, bases, .05)
+    alternate_stops_confidence = alternate_stops(potential_genes, bases, .4, .2)
 
     #print(f"gene {potential_genes[1737]} \ngc: {gc_confidence[1737]}, codon bias: {codon_bias_confidence[1737]}, kozak: {kozak_confidence[1737]}, stop distribution: {stop_distribution_confidence[1737]}")
 
-    confidence = [(shine_dalgarno_confidence[i] + gc_confidence[i] + codon_bias_confidence[i] + stop_distribution_confidence[i])
-                  for i in range(len(potential_genes))]
+    confidence = [(shine_dalgarno_confidence[i] + gc_confidence[i] + codon_bias_confidence[i] + stop_distribution_confidence[i]
+                    + alternate_stops_confidence[i]) for i in range(len(potential_genes))]
 
     # Used to track certian genes
     debug = True
@@ -251,14 +275,14 @@ def check_genes(potential_genes, bases, threshold):
 
 # Graphing
 
-def graph_line(length, genome, chromosome):
+def graph_line(length, genome):
     plt.figure()
     plt.hlines(y=0, xmin=0, xmax=length, color="black")
     plt.xlim(0, length)
 
     plt.yticks([])
     plt.xlabel("Base Position")
-    plt.title(f"{genome} chromosome {chromosome}")
+    plt.title(genome)
 
     plt.scatter([0, 0, length], [-1, 1, 1], color="black", s=0)
 
@@ -281,8 +305,33 @@ def graph_genes(lines, alphas, y_scale):
 
         print(f"{i} of {len(lines)} genes mapped." + (
             "  Confidence = " + str(alphas[i]) if alphas[i] > 0 else ""))
+        print(f"Gene mapped from"f" {start} to {stop}")
+
+# Other
+
+def quick_scan(): # Taken from setup_data.py
+    print(f'\nPlease paste bases in chromosome {i + 1}.')
+    print("Press ENTER on empty line when complete.\n")
+
+    # Loops through all lines on the pasted dataset
+    lines = []
+    while True:
+        line = input()
+        if line == '':
+            break
+        lines.append(line)
+
+    # Joins all lines together
+    chromosome = ''.join(lines)
+
+    # Removes all invalid characters
+    chromosome = ''.join(c.upper() for c in chromosome if c.lower() in {'a', 't', 'c', 'g', 'n'})
+
+    return chromosome
 
 if __name__ == "__main__":
+
+    passed = True
 
     # Primary loop for accessing data
     while True:
@@ -294,52 +343,73 @@ if __name__ == "__main__":
         options = [option.replace("_", " ") for option in options]
 
         print("Please choose a genome to access:")
+        print("Quick Scan [0]")
         for i, option in enumerate(options):
             print(f"{option} [{i + 1}]")
 
+        do_quick_scan = False
+
+        bases = ""
+
         try:
-            genome = options[int(input("Enter index of chosen genome: ")) - 1].replace(" ", "_") + "-genome.db"
+            choice = int(input("Enter index of chosen genome: "))
+            if choice != 0: genome = options[choice - 1].replace(" ", "_") + "-genome.db"
+            else:
+                bases = quick_scan()
+                do_quick_scan = True
+
+                try:
+                    threshold = float(input(f"Enter accuracy threshold: "))
+                except ValueError:
+                    pass
+
+
         except ValueError or IndexError or KeyError:
             print("Please enter valid index.")
             continue
 
-        path = os.path.join("Genomes", genome)
+        if not do_quick_scan:
+            path = os.path.join("Genomes", genome)
 
-        connection = sqlite3.connect(path)
-        cursor = connection.cursor()
+            connection = sqlite3.connect(path)
+            cursor = connection.cursor()
 
-        # Gets table in dataset
-        cursor.execute("SELECT chromosome_number FROM genome")
-        tables = cursor.fetchall()
+            # Gets table in dataset
+            cursor.execute("SELECT chromosome_number FROM genome")
+            tables = cursor.fetchall()
 
-        # Chromosome choice
-        access = input(f"Enter chromosome index to access(1 - {len(tables)}): ") if len(tables) > 1 else 1
-        try:
-            threshold = float(input(f"Enter accuracy threshold: "))
-        except ValueError:
-            pass
+            # Chromosome choice
+            access = input(f"Enter chromosome index to access(1 - {len(tables)}): ") if len(tables) > 1 else 1
+            try:
+                threshold = float(input(f"Enter accuracy threshold: "))
+            except ValueError:
+                pass
 
-        # Checks for valid choice
-        passed = True
-        try:
-            access = int(access)
-        except ValueError:
-            passed = False
+            # Checks for valid choice
+            passed = True
+            try:
+                access = int(access)
+            except ValueError:
+                passed = False
 
-        if (access > len(tables) or access < 1) and passed:
-            print("Invalid index.")
+            if (access > len(tables) or access < 1) and passed:
+                print("Invalid index.")
 
-        # Checks passed; gives info on chromosome
-        else:
-            # Gets chromosome base sequence
-            chromosome = access
-            bases = cursor.execute("SELECT base_sequence FROM genome WHERE chromosome_number = ?", (chromosome,)).fetchall()[0][0]
+            # Checks passed; gives info on chromosome
+        if passed:
+            if not do_quick_scan:
+                # Gets chromosome base sequence
+                chromosome = access
+                bases = cursor.execute("SELECT base_sequence FROM genome WHERE chromosome_number = ?",
+                                       (chromosome,)).fetchall()[0][0]
+
             length = len(bases)
-
-            print(f"chromosome: {access}")
             print(f"bases: {length}")
 
-            graph_line(length, genome.replace("_", " ").removesuffix("-genome.db"), access)
+            if not do_quick_scan:
+                graph_line(length, ''.join([genome.replace("_", " ").removesuffix("-genome.db") + (f" Chromosome {access}" if len(tables) > 1 else "")]))
+            else:
+                graph_line(length, "Quick Scan")
 
             # Gets reverse complement for bases
             complement = {"A": "T", "T": "A", "C": "G", "G": "C"}
