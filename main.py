@@ -11,7 +11,7 @@ import numpy as np
 threshold = 1.4
 minimum_gene_length = 100
 
-codon_table = { # Copied from chatgpt
+codon_table = { # Copied from ChatGPT
     "TTT":"Phe", "TTC":"Phe", "TTA":"Leu", "TTG":"Leu",
     "CTT":"Leu", "CTC":"Leu", "CTA":"Leu", "CTG":"Leu",
     "ATT":"Ile", "ATC":"Ile", "ATA":"Ile", "ATG":"Met",
@@ -33,28 +33,28 @@ codon_table = { # Copied from chatgpt
 # Checks
 
 def get_genes(bases):
-    stops = {"TAA", "TAG", "TGA"}  # Which codons correspond to stop codons
-    starts = {"ATG", "ATA", "GTG"} # Main start codons
+    stops = {"TAA", "TAG", "TGA"}
+    starts = {"ATG", "ATA", "GTG"}
 
+    bases = bases.upper().replace("\n","").replace(" ","")  # clean input
     potential_genes = []
 
-    # Seperates into three reading frames
     for frame in range(3):
-        # Loops through each position in each reading frame
-        for pos in range(frame, len(bases) - 2, 3):
-            codon = ''.join(bases[pos:pos + 3])
-
-            # Checks for start codon
+        pos = frame
+        while pos < len(bases) - 2:
+            codon = bases[pos:pos+3]
             if codon in starts:
-                latest_stop = -1
-
-                # Looks for stop codon
-                for stop in range(pos + 3, len(bases) - 2, 3):
-                    stop_codon = ''.join(bases[stop:stop + 3])
-
+                # search for stop in the same frame
+                stop_pos = pos + 3
+                while stop_pos < len(bases) - 2:
+                    stop_codon = bases[stop_pos:stop_pos+3]
                     if stop_codon in stops:
-                        potential_genes.append((pos, stop+3))
+                        potential_genes.append((pos, stop_pos+3))
                         break
+                    stop_pos += 3
+                pos += 3  # move to next codon in this frame
+            else:
+                pos += 3  # move to next codon in this frame
 
     return potential_genes
 
@@ -124,7 +124,7 @@ def codon_bias_check(potential_genes, bases, confidence_factor_positive, confide
     total = sum(codon_freq.values())
     codon_freq = {k: v / total for k, v in codon_freq.items()}
 
-    # Increases confidence on genes with more preffered codons and vise versa
+    # Increases confidence on genes with more preferred codons and vise versa
     for i, (start, stop) in enumerate(potential_genes):
         score = 0
         codon_count = 0
@@ -138,6 +138,8 @@ def codon_bias_check(potential_genes, bases, confidence_factor_positive, confide
 
         if codon_count > 0:
             confidence[i] += score * confidence_factor_positive / codon_count
+        else:
+            confidence[i] -= confidence_factor_negative;
 
     return confidence
 
@@ -156,7 +158,7 @@ def stop_distribution(potential_genes, bases, confidence_factor_negative):
         elif bases[stop - 3:stop] == "TGA":
             tga += 1
 
-    # Subtract score from genes ending with least common stop codon
+    # Subtract score from genes ending with the least common stop codon
     if min(taa, tag, tga) == taa:
         for i, (start, stop) in enumerate(potential_genes):
             if bases[stop - 3:stop] == "TAA":
@@ -172,7 +174,6 @@ def stop_distribution(potential_genes, bases, confidence_factor_negative):
 
     return confidence
 
-# TODO: ALTERNATIVE FRAME STOP DENSITY -- Complete --
 def alternate_stops(potential_genes, bases, confidence_factor_positive, confidence_factor_negative):
     stops = {"TAA", "TAG", "TGA"}  # Which codons correspond to stop codons
 
@@ -194,7 +195,7 @@ def alternate_stops(potential_genes, bases, confidence_factor_positive, confiden
         frame2 = frame2 / (stop - start)
 
         if frame1 > .02 or frame2 > .02:
-            confidence[i] += confidence_factor_positive * frame1 * frame2
+            confidence[i] += confidence_factor_positive * (frame1 + frame2)
         else:
             confidence[i] -= confidence_factor_negative
 
@@ -204,9 +205,45 @@ def alternate_stops(potential_genes, bases, confidence_factor_positive, confiden
 
 # TODO: CODON ADAPTATION INDEX -- Wait --
 
-# TODO: AMINO ACID ENTROPY CHECK
+# TODO: AMINO ACID ENTROPY CHECK -- Complete --
+def amino_acid_entropy(potential_genes, bases, confidence_factor_positive, confidence_factor_negative, min_val, max_val):
+    confidence = [0 for i in range(len(potential_genes))]
 
-# TODO: FILTER STOPS -- Complete --
+    for i, (start, stop) in enumerate(potential_genes):
+        # Measures frequency of amino acids used
+        codon_freq = {}
+
+        t = 0 # Will be used to normalize values
+
+        # Counts distribution of amino acids
+        for codon_index in range(start, stop, 3):
+            codon = bases[codon_index:codon_index + 3]
+            amino_acid = codon_table[codon]
+
+            if amino_acid in codon_freq:
+                codon_freq[amino_acid] += 1
+            elif not amino_acid == "*":
+                codon_freq[amino_acid] = 1
+
+            t += 1
+
+        # Normalizes values
+        for amino_acid in codon_freq:
+            codon_freq[amino_acid] /= t
+
+        # Computes shannon entropy
+        # Entropy = - sum (p * log2(p))
+
+        entropy = - sum([p * math.log2(p) for a, p in codon_freq.items()])
+
+        # Scores based on randomness of ORF
+        if min_val < entropy < max_val:
+            confidence[i] += confidence_factor_positive
+        else:
+            confidence[i] -= confidence_factor_negative
+
+    return confidence
+
 def filter_stops(potential_genes, confidence):
     best = {}
 
@@ -225,33 +262,82 @@ def filter_stops(potential_genes, confidence):
 
 # TODO: LENGTH-SCALED LIKELIHOOD (exponentially longer orfs are punished; less likely to exist)
 
+def base_bias(potential_genes, bases, confidence_factor_positive, confidence_factor_negative, min_score):
+    confidence = [0 for i in range(len(potential_genes))]
+
+    for i, (start, stop) in enumerate(potential_genes):
+        # Base usage counts
+        frame1 = { "A" : 0, "T" : 0, "C" : 0, "G" : 0}
+        frame2 = {"A" : 0, "T" : 0, "C" : 0, "G" : 0}
+        frame3 = {"A" : 0, "T" : 0, "C" : 0, "G" : 0}
+
+        # Counts distribution of bases
+        for codon in range(start, stop, 3):
+            frame1[bases[codon]] += 1
+            frame2[bases[codon + 1]] += 1
+            frame3[bases[codon + 2]] += 1
+
+        # Normalizes all values
+        for j in range(4):
+            frame1[list(frame1.keys())[j]] /= ((stop - start) / 3)
+            frame2[list(frame2.keys())[j]] /= ((stop - start) / 3)
+            frame3[list(frame3.keys())[j]] /= ((stop - start) / 3)
+
+        # Computes total difference in values between two frames
+        frame1_score = (abs(frame1["A"] - frame2["A"]) +
+                        abs(frame1["T"] - frame2["T"]) +
+                        abs(frame1["C"] - frame2["C"]) +
+                        abs(frame1["G"] - frame2["G"]))
+
+        frame2_score = (abs(frame2["A"] - frame3["A"]) +
+                        abs(frame2["T"] - frame3["T"]) +
+                        abs(frame2["C"] - frame3["C"]) +
+                        abs(frame2["G"] - frame3["G"]))
+
+        frame3_score = (abs(frame3["A"] - frame1["A"]) +
+                        abs(frame3["T"] - frame1["T"]) +
+                        abs(frame3["C"] - frame1["C"]) +
+                        abs(frame3["G"] - frame1["G"]))
+
+        total = frame1_score + frame2_score + frame3_score
+
+        if total > min_score:
+            confidence[i] += confidence_factor_positive * total
+        else:
+            confidence[i] -= confidence_factor_negative
+
+
+    return confidence
+
 def check_genes(potential_genes, bases, threshold):
     shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, 1)
     gc_confidence = gc_comparison(potential_genes, bases, .3, .3, .48)
     codon_bias_confidence = codon_bias_check(potential_genes, bases, 10, 3)
     stop_distribution_confidence = stop_distribution(potential_genes, bases, .05)
-    alternate_stops_confidence = alternate_stops(potential_genes, bases, 300, .2)
+    alternate_stops_confidence = alternate_stops(potential_genes, bases, 10, .2)
+    base_bias_confidence = base_bias(potential_genes, bases, .3, .3, .5)
+    entropy_confidence = amino_acid_entropy(potential_genes, bases, .3, .5, 3, 4.15)
 
     #print(f"gene {potential_genes[1737]} \ngc: {gc_confidence[1737]}, codon bias: {codon_bias_confidence[1737]}, kozak: {kozak_confidence[1737]}, stop distribution: {stop_distribution_confidence[1737]}")
 
     confidence = [(shine_dalgarno_confidence[i] + gc_confidence[i] + codon_bias_confidence[i] + stop_distribution_confidence[i]
-                    + alternate_stops_confidence[i]) for i in range(len(potential_genes))]
+                    + alternate_stops_confidence[i] + base_bias_confidence[i] + entropy_confidence[i]) for i in range(len(potential_genes))]
 
-    # Used to track certian genes
+    # Used to track certain genes
     debug = True
-    gene = (7201, 7600)
+    gene = (15505, 18903)
     if debug:
         try:
-            i = potential_genes.index(gene)
+            i = potential_genes.index((gene[0]-1, gene[1])) # Program offsets start by 1 by default
             print(f"Gene: {gene}")
             print(f"Confidence: {confidence[i]}")
             print(
                 f"Shine Dalgarno: {shine_dalgarno_confidence[i]}; GC distribution: {gc_confidence[i]}; codon bias: {codon_bias_confidence[i]}; stop usage: {stop_distribution_confidence[i]}; "
-                f"alternate stops: {alternate_stops_confidence[i]}")
+                f"alternate stops: {alternate_stops_confidence[i]}; base bias: {base_bias_confidence[i]}; amino acid entropy: {entropy_confidence[i]}")
         except ValueError:
             print(f"Gene {gene} not found")
 
-    # Filters out super small genes
+    # Filters out minimal genes
     filtered_genes = []
     filtered_confidence = []
 
@@ -259,7 +345,7 @@ def check_genes(potential_genes, bases, threshold):
         if stop - start < minimum_gene_length:
             pass
         else:
-            if stop - start < len(bases) / 1000: # If all genes failed this requernment only ~.1% of the genome would be genes; 10x smaller than the average percent in eukaryotes
+            if stop - start < len(bases) / 1000: # If all genes failed this requirement only ~.1% of the genome would be genes; 10x smaller than the average percent in eukaryotes
                 confidence[i] -= .2
 
             filtered_genes.append(potential_genes[i])
@@ -267,10 +353,6 @@ def check_genes(potential_genes, bases, threshold):
 
     potential_genes = filtered_genes
     confidence = filtered_confidence
-
-    for i, (start, stop) in enumerate(potential_genes):
-        if stop - start > 1000: # Often a bias against larger genes; helps combat this
-            confidence[i] += .4
 
     #potential_genes, confidence = remove_nested(potential_genes, confidence)
 
@@ -425,6 +507,8 @@ if __name__ == "__main__":
             length = len(bases)
             print(f"bases: {length}")
 
+            print(f"Gene: {bases[190:193]}")
+
             if not do_quick_scan:
                 graph_line(length, ''.join([genome.replace("_", " ").removesuffix("-genome.db") + (f" Chromosome {access}" if len(tables) > 1 else "")]))
             else:
@@ -447,30 +531,13 @@ if __name__ == "__main__":
             graph_genes(potential_genes, confidence, 1)
             graph_genes(reverse_potential_genes, reverse_confidence, -1)
 
-                # Loops through all codons to assign amino acids
-                # amino_acids = []
-
-                # for j in range(int(start/3), int(stop/3)):
-                    # amino_acids.append(codon_table[codons[int(j)]])
-
-
-                # print(f"total bps in gene {i}: {len(amino_acids*3)}")
-                # print(f"amino acids in gene {i}: {amino_acids}\n")
-
-                # Updates current letter
-                # i += 1
-
-            # Plots TATA boxes
-            #for i in range(len(bases)-3):
-            #    if bases[i:i+6] == "TATAAA":
-            #        plt.scatter(i, 0, color="green", s=10
-
             plt.show(block=False)
+            plt.pause(0.001) # Time for rendering to occur
 
             potential_genes.sort(key=lambda x: x[0])
 
             print(f"{len(potential_genes) + len(reverse_potential_genes)} genes mapped.")
-            print(f"Genes(start, stop): forward {potential_genes} reverse {reverse_potential_genes}")
+            print(f"Genes(start, stop): forward {[(start+1, stop) for start, stop in potential_genes]} reverse {[(start+1, stop) for start, stop in reverse_potential_genes]}")
 
-            if input("Press ENTER to exit, or any key then enter to view other chromosome\n") == "":
+            if input("Press ENTER to exit, or any key then enter to view other organisms\n") == "":
                 break
