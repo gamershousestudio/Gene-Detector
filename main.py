@@ -9,7 +9,7 @@ import numpy as np
 
 # Genome information
 threshold = 4
-minimum_gene_length = 100
+minimum_gene_length = 150
 
 codon_table = { # Copied from ChatGPT
     "TTT":"Phe", "TTC":"Phe", "TTA":"Leu", "TTG":"Leu",
@@ -213,7 +213,6 @@ def alternate_stops(potential_genes, bases, confidence_factor_positive, confiden
 
 # TODO: CODON ADAPTATION INDEX -- Wait --
 
-# TODO: AMINO ACID ENTROPY CHECK -- Complete --
 def amino_acid_entropy(potential_genes, bases, confidence_factor_positive, confidence_factor_negative, min_val, max_val):
     confidence = [0 for i in range(len(potential_genes))]
 
@@ -252,26 +251,26 @@ def amino_acid_entropy(potential_genes, bases, confidence_factor_positive, confi
 
     return confidence
 
-# TODO: HELP PREVENT FALSE GENE DETECTION WITHIN GENES ON 'ATG' STARTS
+# TODO: HELP PREVENT FALSE GENE DETECTION WITHIN GENES ON 'ATG' STARTS -- Complete --
+# TODO: HELP MAKE THIS FUNCTION AS ACCURATE AS POSSIBLE
 def filter_stops(potential_genes, confidence, bases):
     best = {}
-
-    # Organize genes by order
-    pair = [(gene, confidence[i]) for i, gene in enumerate(potential_genes)]
-    pair.sort(key = lambda x: x[0][0])
-
-    potential_genes = [p[0] for p in pair]
-    confidence = [p[1] for p in pair]
 
     # Loop through all genes
     for gene, conf in zip(potential_genes, confidence):
         start, stop = gene
 
+        if (start, stop) == (2633, 2839):
+            print(conf)
+            print(best[stop])
+
         if stop not in best:
             best[stop] = (gene, conf)
+
+
         elif conf > best[stop][1]:
-            if bases[start:start+3] == "ATG":
-                if conf > 2*best[stop][1] and start > best[stop][0][0]: # Commonly exists in real genes; must be SUPER confidence
+            if bases[start:start+3] == "ATG" or bases[start:start+3] == "GTG": # Two most common to exist within genes
+                if conf > (1.1*best[stop][1]) and start > best[stop][0][0]: # Commonly exists in real genes; must be SUPER confidence
                     best[stop] = (gene, conf)
                 elif start < best[stop][0][0]:
                     best[stop] = (gene, conf)
@@ -282,7 +281,6 @@ def filter_stops(potential_genes, confidence, bases):
 
     return genes, confidences
 
-# TODO: START CODON PREFERENCE
 def start_codon_preference(potential_genes, bases, confidence_factor_positive, confidence_factor_negative):
     confidence = [0 for i in range(len(potential_genes))]
 
@@ -293,7 +291,7 @@ def start_codon_preference(potential_genes, bases, confidence_factor_positive, c
         if start_codon == "ATG": # Most common
             confidence[i] += confidence_factor_positive
         elif start_codon == "GTG": # Somewhat uncommon(~15%)
-            confidence[i] -= confidence_factor_negative/2
+            confidence[i] -= confidence_factor_negative/10
         elif start_codon == "TTG": # Super uncommon
             confidence[i] -= confidence_factor_negative
         else: # All others very rare
@@ -351,16 +349,14 @@ def base_bias(potential_genes, bases, confidence_factor_positive, confidence_fac
     return confidence
 
 def check_genes(potential_genes, bases, threshold):
-    shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, 1)
+    shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, 3)
     gc_confidence = gc_comparison(potential_genes, bases, 1, 1, .5)
     codon_bias_confidence = codon_bias_check(potential_genes, bases, 20, 3)
-    stop_distribution_confidence = stop_distribution(potential_genes, bases, .05)
+    stop_distribution_confidence = stop_distribution(potential_genes, bases, 5)
     alternate_stops_confidence = alternate_stops(potential_genes, bases, 30, .2)
-    base_bias_confidence = base_bias(potential_genes, bases, .3, .3, .5)
-    entropy_confidence = amino_acid_entropy(potential_genes, bases, .3, .5, 2.5, 4.15)
-    start_codon_confidence = start_codon_preference(potential_genes, bases, .3, .3)
-
-    #print(f"gene {potential_genes[1737]} \ngc: {gc_confidence[1737]}, codon bias: {codon_bias_confidence[1737]}, kozak: {kozak_confidence[1737]}, stop distribution: {stop_distribution_confidence[1737]}")
+    base_bias_confidence = base_bias(potential_genes, bases, 3, .3, .5)
+    entropy_confidence = amino_acid_entropy(potential_genes, bases, .4, .5, 2.5, 4.15)
+    start_codon_confidence = start_codon_preference(potential_genes, bases, .3, 2)
 
     confidence = [(shine_dalgarno_confidence[i] + gc_confidence[i] + codon_bias_confidence[i] + stop_distribution_confidence[i]
                    + alternate_stops_confidence[i] + base_bias_confidence[i] + entropy_confidence[i] + start_codon_confidence[i])
@@ -368,7 +364,7 @@ def check_genes(potential_genes, bases, threshold):
 
     # Used to track certain genes
     debug = True
-    genes = [(711, 2636), (930, 2636)]
+    genes = [(144, 332)]
 
     for gene in genes:
         if debug:
@@ -413,7 +409,7 @@ def check_genes(potential_genes, bases, threshold):
     potential_genes = filtered_genes
     confidence = filtered_confidence
 
-    potential_genes, confidence = filter_stops(potential_genes, confidence, bases)
+    potential_genes, confidence = filter_stops(potential_genes, confidence, bases) # Replacing too many real ORFs with false positives for now
 
     return potential_genes, confidence
 
@@ -437,11 +433,11 @@ def graph_genes(lines, alphas, y_scale):
 
         # Labels genes
         if start % 3 == 0:
-            plt.hlines(y=.1*y_scale, xmin=start, xmax=stop, color="red", alpha=min(alphas[i] ** 2, 1))
+            plt.hlines(y=.1*y_scale, xmin=start, xmax=stop, color="red", alpha=min((alphas[i] ** 2) / 100, 1))
         elif start % 3 == 1:
-            plt.hlines(y=.2*y_scale, xmin=start, xmax=stop, color="blue", alpha=min(alphas[i] ** 2, 1))
+            plt.hlines(y=.2*y_scale, xmin=start, xmax=stop, color="blue", alpha=min((alphas[i] ** 2) / 100, 1))
         elif start % 3 == 2:
-            plt.hlines(y=.3*y_scale, xmin=start, xmax=stop, color="brown", alpha=min(alphas[i] ** 2, 1))
+            plt.hlines(y=.3*y_scale, xmin=start, xmax=stop, color="brown", alpha=min((alphas[i] ** 2) / 100, 1))
         # plt.annotate(text=str(i),
         # xy=((start+stop)/2, 0),
         # xytext=((start+stop)/2, (.1 if i % 2 == 1 else -.1)),
