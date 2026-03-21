@@ -6,6 +6,7 @@ import sqlite3
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Cursor
 import numpy as np
+from uaclient.config import VALID_UA_CONFIG_KEYS
 
 # Genome information
 threshold = 7
@@ -472,7 +473,7 @@ def quick_scan(): # Taken from setup_data.py
 
     return bases
 
-def get_bases(genome):
+def get_data(genome):
     path = os.path.join("Genomes", genome)
 
     connection = sqlite3.connect(path)
@@ -484,7 +485,41 @@ def get_bases(genome):
     # Gets chromosome base sequence
     bases = cursor.fetchall()[0][0]
 
-    return bases
+    cursor.close()
+    connection.close()
+
+    # Gets all forward genes
+    connection = sqlite3.connect(path)
+    cursor = connection.cursor()
+    cursor.execute("SELECT starts, stops FROM forward_proteins")
+
+    forward = cursor.fetchall()
+
+    cursor.close()
+    connection.close()
+
+    return bases, forward # TODO: ADD BACKWARDS
+
+# Other
+
+def score_predictions(predictions, genes):
+    missed = []
+    extras = []
+
+    correct = []
+
+    for value in predictions:
+        if value in genes:
+            genes.remove(value)
+            correct.append(value)
+        else:
+            extras.append(value)
+
+    missed = genes
+
+    print(f"{len(correct)} correctly found genes: {correct}")
+    print(f"{len(missed)} missed genes: {missed}")
+    print(f"{len(extras)} extra genes: {extras}")
 
 if __name__ == "__main__":
 
@@ -505,11 +540,14 @@ if __name__ == "__main__":
         bases = ""
         genome = ""
 
+        genes_forward = []
+        genes_reverse = []
+
         try:
             choice = int(input("Enter index of chosen genome: "))
             if choice != 0:
                 genome = options[choice - 1].replace(" ", "_") + "-genome.db"
-                bases = get_bases(genome)
+                bases, genes_forward = get_data(genome)
             else:
                 genome = "Quick Scan"
                 bases = quick_scan()
@@ -544,6 +582,9 @@ if __name__ == "__main__":
         # Makes reversed genes start/stop accurate
         reverse_potential_genes = [(length - stop, length - start)for start, stop in reverse_potential_genes]
 
+        # Fixes gene starts
+        potential_genes = [(start+1, stop) for start, stop in potential_genes]
+
         # Plots gene map
         graph_genes(potential_genes, confidence, 1)
         graph_genes(reverse_potential_genes, reverse_confidence, -1)
@@ -555,6 +596,11 @@ if __name__ == "__main__":
 
         print(f"{len(potential_genes) + len(reverse_potential_genes)} genes mapped.")
         print(f"Genes(start, stop): forward {[(start+1, stop) for start, stop in potential_genes]} reverse {[(start+1, stop) for start, stop in reverse_potential_genes]}")
+
+        print("")
+
+        # Scoring (for debug)
+        score_predictions(potential_genes, genes_forward)
 
         if input("Press ENTER to exit, or any key then enter to view other organisms\n") == "":
             break
