@@ -6,7 +6,6 @@ import sqlite3
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Cursor
 import numpy as np
-from uaclient.config import VALID_UA_CONFIG_KEYS
 
 # Genome information
 threshold = 7
@@ -351,13 +350,13 @@ def base_bias(potential_genes, bases, confidence_factor_positive, confidence_fac
 
 
     return confidence
-
-def check_genes(potential_genes, bases, threshold):
-    shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, 3)
-    gc_confidence = gc_comparison(potential_genes, bases, 1, 1, .5)
-    codon_bias_confidence = codon_bias_check(potential_genes, bases, 20, 3)
-    stop_distribution_confidence = stop_distribution(potential_genes, bases, 5)
-    alternate_stops_confidence = alternate_stops(potential_genes, bases, 30, .2)
+# confidence_vals = 3, 1, 20, 3, 5, 30, .2
+def check_genes(potential_genes, bases, threshold, confidence_vals):
+    shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, confidence_vals[0])
+    gc_confidence = gc_comparison(potential_genes, bases, confidence_vals[1], confidence_vals[1], .5)
+    codon_bias_confidence = codon_bias_check(potential_genes, bases, confidence_vals[2], confidence_vals[3])
+    stop_distribution_confidence = stop_distribution(potential_genes, bases, confidence_vals[4])
+    alternate_stops_confidence = alternate_stops(potential_genes, bases, confidence_vals[5], confidence_vals[6])
     base_bias_confidence = base_bias(potential_genes, bases, 3, .3, .5)
     entropy_confidence = amino_acid_entropy(potential_genes, bases, .4, .5, 2.5, 4.15)
     start_codon_confidence = start_codon_preference(potential_genes, bases, .3, 2)
@@ -500,7 +499,7 @@ def get_data(genome):
 
     return bases, forward # TODO: ADD BACKWARDS
 
-# Other
+# Scoring analysis
 
 def score_predictions(predictions, genes):
     missed = []
@@ -520,6 +519,9 @@ def score_predictions(predictions, genes):
     print(f"{len(correct)} correctly found genes: {correct}")
     print(f"{len(missed)} missed genes: {missed}")
     print(f"{len(extras)} extra genes: {extras}")
+
+def analyze_gene(gene, bases):
+    return
 
 if __name__ == "__main__":
 
@@ -602,5 +604,11 @@ if __name__ == "__main__":
         # Scoring (for debug)
         score_predictions(potential_genes, genes_forward)
 
-        if input("Press ENTER to exit, or any key then enter to view other organisms\n") == "":
-            break
+        #if input("Press ENTER to exit, or any key then enter to view other organisms\n") == "": <- In the process of being replaced with debug
+            #break                                                                                  May re-add later
+
+        # Analyzation of specific genes for debug
+        if input("Would you like to check the statistics of a specific gene? (y/n) ")[0].lower() == "y":
+            # TODO: ADD CONFIDENCE VALUE SHOWCASE OF SPECIFIC GENE
+            # TODO: ADD FURTHER ANALYZING TECHNIQUES
+            pass
