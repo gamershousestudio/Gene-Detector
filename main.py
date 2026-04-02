@@ -263,7 +263,7 @@ def filter_stops(potential_genes, confidence, bases):
     for gene, conf in zip(potential_genes, confidence):
         start, stop = gene
 
-        if (start, stop) == (2633, 2839):
+        if (start, stop) == (268, 736):
             print(conf)
             print(best[stop])
 
@@ -273,7 +273,7 @@ def filter_stops(potential_genes, confidence, bases):
 
         elif conf > best[stop][1]:
             if bases[start:start+3] == "ATG" or bases[start:start+3] == "GTG": # Two most common to exist within genes
-                if conf > (1.1*best[stop][1]) and start > best[stop][0][0]: # Commonly exists in real genes; must be SUPER confidence
+                if conf > (1.13*best[stop][1]) and start > best[stop][0][0]: # Commonly exists in real genes; must be SUPER confidence
                     best[stop] = (gene, conf)
                 elif start < best[stop][0][0]:
                     best[stop] = (gene, conf)
@@ -350,36 +350,21 @@ def base_bias(potential_genes, bases, confidence_factor_positive, confidence_fac
 
 
     return confidence
-# confidence_vals = 3, 1, 20, 3, 5, 30, .2
+# confidence_vals = 3, 1, 20, 3, 5, 30, .2, 3, .3, .4, .5, .3, 2
 def check_genes(potential_genes, bases, threshold, confidence_vals):
     shine_dalgarno_confidence = shine_dalgarno(potential_genes, bases, confidence_vals[0])
+
     gc_confidence = gc_comparison(potential_genes, bases, confidence_vals[1], confidence_vals[1], .5)
     codon_bias_confidence = codon_bias_check(potential_genes, bases, confidence_vals[2], confidence_vals[3])
     stop_distribution_confidence = stop_distribution(potential_genes, bases, confidence_vals[4])
     alternate_stops_confidence = alternate_stops(potential_genes, bases, confidence_vals[5], confidence_vals[6])
-    base_bias_confidence = base_bias(potential_genes, bases, 3, .3, .5)
-    entropy_confidence = amino_acid_entropy(potential_genes, bases, .4, .5, 2.5, 4.15)
-    start_codon_confidence = start_codon_preference(potential_genes, bases, .3, 2)
+    base_bias_confidence = base_bias(potential_genes, bases, confidence_vals[7], confidence_vals[8], .5)
+    entropy_confidence = amino_acid_entropy(potential_genes, bases, confidence_vals[9], confidence_vals[10], 2.5, 4.15)
+    start_codon_confidence = start_codon_preference(potential_genes, bases, confidence_vals[11], confidence_vals[12])
 
     confidence = [(shine_dalgarno_confidence[i] + gc_confidence[i] + codon_bias_confidence[i] + stop_distribution_confidence[i]
                    + alternate_stops_confidence[i] + base_bias_confidence[i] + entropy_confidence[i] + start_codon_confidence[i])
                   for i in range(len(potential_genes))]
-
-    # Used to track certain genes
-    debug = True
-    genes = [(144, 332)]
-
-    for gene in genes:
-        if debug:
-            try:
-                i = potential_genes.index((gene[0]-1, gene[1])) # Program offsets start by 1 by default
-                print(f"Gene: {gene}")
-                print(f"Confidence: {confidence[i]}")
-                print(
-                    f"Shine Dalgarno: {shine_dalgarno_confidence[i]}; GC distribution: {gc_confidence[i]}; codon bias: {codon_bias_confidence[i]}; stop usage: {stop_distribution_confidence[i]}; "
-                    f"alternate stops: {alternate_stops_confidence[i]}; base bias: {base_bias_confidence[i]}; amino acid entropy: {entropy_confidence[i]}; start codon preference: {start_codon_confidence[i]}")
-            except ValueError:
-                print(f"Gene {gene} not found")
 
     # Filters out minimal genes
     filtered_genes = []
@@ -520,8 +505,43 @@ def score_predictions(predictions, genes):
     print(f"{len(missed)} missed genes: {missed}")
     print(f"{len(extras)} extra genes: {extras}")
 
-def analyze_gene(gene, bases):
-    return
+    return correct, missed, extras
+
+def analyze_gene_confidence(gene, genes, bases, confidence_vals):
+    shine_dalgarno_confidence = shine_dalgarno(genes, bases, confidence_vals[0])
+    gc_confidence = gc_comparison(genes, bases, confidence_vals[1], confidence_vals[1], .5)
+    codon_bias_confidence = codon_bias_check(genes, bases, confidence_vals[2], confidence_vals[3])
+    stop_distribution_confidence = stop_distribution(genes, bases, confidence_vals[4])
+    alternate_stops_confidence = alternate_stops(genes, bases, confidence_vals[5], confidence_vals[6])
+    base_bias_confidence = base_bias(genes, bases, confidence_vals[7], confidence_vals[8], .5)
+    entropy_confidence = amino_acid_entropy(genes, bases, confidence_vals[9], confidence_vals[10], 2.5, 4.15)
+    start_codon_confidence = start_codon_preference(genes, bases, confidence_vals[11], confidence_vals[12])
+
+    try: # Checks if gene is even valid
+        i = genes.index((gene[0]-1, gene[1]))
+    except ValueError:
+        print("Invalid gene!")
+        return
+
+
+    values = [shine_dalgarno_confidence[i], gc_confidence[i], codon_bias_confidence[i], stop_distribution_confidence[i], alternate_stops_confidence[i], base_bias_confidence[i], entropy_confidence[i], start_codon_confidence[i]]
+
+    labels = ["Shine\nDalgarno", "GC\nContent", "Codon\nBias", "Stop\nCodon\nDistribution", "Alternate\nFrame\nStop\nCodons", "Base\nBias", "Entropy", "Start\nCodon\nPreference"]
+
+    colors = ["red", "blue", "green", "yellow", "aqua", "purple", "brown", "orange"]
+    for j, value in enumerate(values):
+        plt.bar(x=j*2, height=value, color=colors[j], alpha=.5)
+
+    plt.xticks([j * 2 for j in range(8)], labels)
+    plt.title("Confidence: " + str(sum(values)))
+    plt.suptitle("Gene: " + str(gene[0]-1) + " - " + str(gene[1]))
+
+    plt.hlines(0, -2, 16, color="black")
+    plt.scatter([0, 0], [-2, 2], alpha=0)
+
+    plt.show()
+
+    print("Sequence: " + bases[gene[0]-1:gene[1]])
 
 if __name__ == "__main__":
 
@@ -575,11 +595,25 @@ if __name__ == "__main__":
         complement = {"A": "T", "T": "A", "C": "G", "G": "C"}
         reverse_complement = "".join([complement[b] if b != "N" else "N" for b in reversed(bases)])
 
+        # Gets genes
         potential_genes = get_genes(bases)
         reverse_potential_genes = get_genes(reverse_complement)
 
-        potential_genes, confidence = check_genes(potential_genes, bases, threshold)
-        reverse_potential_genes, reverse_confidence = check_genes(reverse_potential_genes, reverse_complement, threshold)
+        # Scoring
+
+        # -- Collapsable -- Parameter key
+        confidence_vals = [3, # Index 0 = shine dalgarno reward
+                           1, # Index 1 = GC content reward/punishment
+                           20, 3, # Index 2 = codon bias reward; Index 3 = codon bias punishment
+                           5, # Index 4 = stop distribution reward
+                           50, .2, # Index 5 = alternate stops reward; Index 6 = alternate stops punishment
+                           1, 1, # Index 7 = base bias reward; Index 8 = base bias punishment
+                           .4, .5, # Index 9 = entropy check reward; Index 10 = entropy check punishment
+                           .3, 2 # Index 11 = start codon reward; Index 12 = start codon punishment
+                           ]
+
+        potential_genes, confidence = check_genes(potential_genes, bases, threshold, confidence_vals)
+        reverse_potential_genes, reverse_confidence = check_genes(reverse_potential_genes, reverse_complement, threshold, confidence_vals)
 
         # Makes reversed genes start/stop accurate
         reverse_potential_genes = [(length - stop, length - start)for start, stop in reverse_potential_genes]
@@ -602,13 +636,53 @@ if __name__ == "__main__":
         print("")
 
         # Scoring (for debug)
-        score_predictions(potential_genes, genes_forward)
+        correct, missed, extra = score_predictions(potential_genes, genes_forward)
 
         #if input("Press ENTER to exit, or any key then enter to view other organisms\n") == "": <- In the process of being replaced with debug
             #break                                                                                  May re-add later
 
         # Analyzation of specific genes for debug
-        if input("Would you like to check the statistics of a specific gene? (y/n) ")[0].lower() == "y":
-            # TODO: ADD CONFIDENCE VALUE SHOWCASE OF SPECIFIC GENE
-            # TODO: ADD FURTHER ANALYZING TECHNIQUES
-            pass
+        cont = True
+
+        while cont:
+            if input("Would you like to check the statistics of a specific gene? (y/n) ")[0].lower() == "y":
+                gene = (int(input("Enter start location of gene to check: ")),
+                        int(input("Enter stop location of gene to check: ")))
+
+                analyze_gene_confidence(gene, get_genes(bases), bases, confidence_vals)
+            else:
+                cont = False
+
+        cont = True
+
+        while cont:
+            if input("Would you like to analyze alternate genes on certain stop? (y/n) ")[0].lower() == "y":
+                pass # TODO: SHOW ALL GENES AT SAME STOP AND THEIR CONFIDENCES
+
+                # Saves all stops
+                stops = {stop : [(start, stop)] for i, (start, stop) in enumerate(extra)}
+
+                # Gets all alternate stops
+                for start, stop in missed:
+                    if stop in stops:
+                        stops[stop].append((start, stop))
+
+                # Prints out results
+                for stop in stops:
+                    if len(stops[stop]) > 1:
+                        print(f"Alternate stops for {stop}:")
+                        print(f"Correct: {stops[stop][1]}")
+                        print(f"Detected: {stops[stop][0]}\n")
+
+                stop = input("Please select a stop location to analyze alternate genes on: ")
+
+                try:
+                    analyze_gene_confidence(stops[int(stop)][1], get_genes(bases), bases, confidence_vals)
+                    analyze_gene_confidence(stops[int(stop)][0], get_genes(bases), bases, confidence_vals)
+                except KeyError:
+                    print("Invalid stop location.")
+
+            else:
+                cont = False
+
+        # TODO: ADD FURTHER ANALYZING TECHNIQUES & MOVE TO FUNCTION
